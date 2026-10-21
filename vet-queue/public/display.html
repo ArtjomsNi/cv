@@ -10,13 +10,22 @@
     .head { padding: 2vh 3vw; display: flex; justify-content: space-between; align-items: baseline; }
     .head h1 { font-size: 4vh; margin: 0; }
     .clock { font-size: 4vh; font-variant-numeric: tabular-nums; }
-    .cols { flex: 1; display: grid; grid-template-columns: 3fr 2fr; gap: 3vw; padding: 0 3vw 3vh; }
+    .cols { display: grid; grid-template-columns: 3fr 2fr; gap: 3vw; padding: 0 3vw 3vh; }
     .col h2 { font-size: 3vh; color: #8fb3bd; text-transform: uppercase; letter-spacing: .1em; }
     .now { display: grid; gap: 2vh; }
     .now div { background: #1a7f6e; border-radius: 2vh; padding: 2vh 3vw; display: flex; justify-content: space-between; font-size: 8vh; font-weight: 700; }
     .now div span { font-weight: 400; }
     .wait { display: flex; flex-wrap: wrap; gap: 1.5vh; }
     .wait span { background: #22343c; border-radius: 1.5vh; padding: 1vh 2vw; font-size: 5vh; font-variant-numeric: tabular-nums; }
+    .wait small { display: block; font-size: 2.4vh; color: #8fb3bd; text-align: center; }
+    .tlbox { flex: 1; padding: 0 3vw 2vh; --bg: #1a2a31; --card: #0e1a1f; --text: #fff; --muted: #8fb3bd; --line: #2c4650;
+      --accent: #2bb39a; --ok-soft: #1d4a35; --ok: #7be0a8; --warn-soft: #4a3a17; --warn: #ffc56b; --bad: #ff6b5b; }
+    .tlbox h2 { font-size: 3vh; color: #8fb3bd; text-transform: uppercase; letter-spacing: .1em; }
+    .tlbox .tl { font-size: 2vh; }
+    .tlbox .tl-row, .tlbox .tl-labels div:not(:first-child) { height: 6vh; }
+    .tlbox .tl-bar { line-height: calc(6vh - 6px); }
+    .tlbox .tl-labels div:not(:first-child) { line-height: 6vh; }
+    .tlbox .tl-summary { font-size: 2.6vh; color: #cfe3e8; }
     .foot { padding: 2vh 3vw; font-size: 3vh; color: #8fb3bd; display: flex; gap: 4vw; border-top: 1px solid #22343c; }
     .foot b { color: #fff; }
   </style>
@@ -27,6 +36,7 @@
     <div class="col"><h2>Проходите</h2><div class="now" id="now"></div></div>
     <div class="col"><h2>Ожидают</h2><div class="wait" id="wait"></div></div>
   </div>
+  <div class="tlbox"><h2>Таймлайн очереди</h2><div id="tl"></div></div>
   <div class="foot">
     <div>В очереди: <b id="cnt">0</b></div>
     <div>Среднее ожидание: <b id="avg">—</b></div>
@@ -53,15 +63,18 @@
       const s = c.stats;
       $('#name').textContent = c.name;
       $('#now').innerHTML = s.serving.map(x => `<div>${esc(x.number)}<span>${x.room ? '→ ' + esc(x.room) : ''}</span></div>`).join('') || '<p style="font-size:3vh;color:#8fb3bd">—</p>';
-      $('#wait').innerHTML = s.waiting.map(n => `<span>${esc(n)}</span>`).join('');
+      $('#wait').innerHTML = c.timeline.items.filter(i => i.status === 'waiting')
+        .map(i => `<span>${esc(i.number)}<small>≈ ${hhmm(i.start)}</small></span>`).join('');
       $('#cnt').textContent = s.waitingCount;
       $('#avg').textContent = minutes(s.avgWaitMin);
       $('#est').textContent = minutes(s.estimatedWaitMin);
+      $('#tl').innerHTML = renderTimeline(c.timeline);
       const key = s.serving.map(x => x.number).join(',');
       if (lastServing && key !== lastServing && s.serving.length) beep();
       lastServing = key || ' ';
     }
     setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); }, 1000);
+    setInterval(() => load().catch(() => {}), 60000);
     load().catch(e => { $('#name').textContent = e.message; });
     onLive(({ scope }) => { if (scope === 'clinic:' + id) load(); });
   </script>

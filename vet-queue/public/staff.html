@@ -16,6 +16,7 @@
   <main>
     <div class="tabs" id="tabs">
       <button data-tab="queue" class="active">Очередь</button>
+      <button data-tab="cases">Кейсы и время</button>
       <button data-tab="equipment">Аппараты</button>
       <button data-tab="prices" class="admin">Цены</button>
       <button data-tab="users" class="admin">Сотрудники</button>
@@ -25,15 +26,18 @@
     <!-- Очередь -->
     <section data-pane="queue">
       <div class="stats" id="stats"></div>
+      <div class="card" style="margin-bottom:16px"><h3>Таймлайн</h3><div id="timeline"></div><div id="tlLegend"></div></div>
       <div class="two">
         <div class="card">
           <h3>Клиент пришёл</h3>
           <form class="row" id="addForm">
-            <input name="ownerName" placeholder="Владелец" maxlength="100" style="flex:1">
-            <input name="petName" placeholder="Питомец" maxlength="100" style="flex:1">
+            <input name="ownerName" placeholder="Владелец" maxlength="100" style="flex:1 1 120px">
+            <input name="petName" placeholder="Питомец" maxlength="100" style="flex:1 1 120px">
+            <select name="caseId" style="flex:1 1 100%"></select>
+            <input name="minutes" type="number" min="1" max="480" placeholder="мин" title="Своё время, если отличается от типового" style="width:70px">
             <button type="submit">+ В очередь</button>
           </form>
-          <p class="small muted">Можно оставить поля пустыми — клиент получит номер.</p>
+          <p class="small muted">Кейс можно выбрать и позже, после осмотра. Без кейса берётся среднее время приёма.</p>
         </div>
         <div class="card">
           <h3>Вызвать следующего</h3>
@@ -44,12 +48,28 @@
           <p class="small muted">Номер появится на табло и на сайте.</p>
         </div>
       </div>
-      <div class="two" style="margin-top:16px">
+      <div class="two" id="queueLists" style="margin-top:16px">
         <div class="card"><h3>На приёме</h3><table id="serving"></table></div>
         <div class="card"><h3>Ожидают</h3><table id="waiting"></table></div>
       </div>
       <div class="card" style="margin-top:16px">
         <details><summary>Завершённые и отменённые сегодня</summary><table id="finished"></table></details>
+      </div>
+    </section>
+
+    <!-- Кейсы -->
+    <section data-pane="cases" class="hidden">
+      <div class="card">
+        <p class="small muted">Типовое время на диагностику и лечение. По нему строится таймлайн и считается, когда примерно подойдёт очередь каждого пациента.</p>
+        <table>
+          <thead><tr><th>Кейс</th><th>Минут</th><th></th></tr></thead>
+          <tbody id="caseBody"></tbody>
+        </table>
+        <form class="row" id="caseForm" style="margin-top:12px">
+          <input name="name" placeholder="Новый кейс" required maxlength="100" style="flex:1">
+          <input name="minutes" type="number" min="1" max="480" placeholder="мин" required style="width:80px">
+          <button type="submit">Добавить</button>
+        </form>
       </div>
     </section>
 
@@ -150,18 +170,36 @@
         <div class="stat"><b>${minutes(s.avgWaitMin)}</b><span>ср. ожидание · ≈ ${minutes(s.estimatedWaitMin)} для нового</span></div>
         <div class="stat"><b>${s.servedToday}</b><span>принято сегодня · приём ≈ ${minutes(s.avgServiceMin)}</span></div>`;
       const who = t => `${esc(t.ownerName)}${t.ownerName && t.petName ? ' · ' : ''}${esc(t.petName)}` || '<span class="muted">—</span>';
+      const plan = Object.fromEntries(clinic.timeline.items.map(i => [i.number, i]));
+      const caseCtl = t => `<div class="row" style="margin-top:4px" data-ticket="${t.id}">
+        <select data-f="caseId" class="small" style="max-width:190px">${caseOptions(t.caseId)}</select>
+        <input data-f="minutes" type="number" min="1" max="480" value="${t.plannedMin || ''}" placeholder="мин" style="width:62px" class="small"></div>`;
       const byTime = (a, b) => a.createdAt - b.createdAt;
       const serving = clinic.tickets.filter(t => t.status === 'in_service').sort(byTime);
       const waiting = clinic.tickets.filter(t => t.status === 'waiting').sort(byTime);
       const finished = clinic.tickets.filter(t => t.status === 'done' || t.status === 'cancelled').sort((a, b) => b.doneAt - a.doneAt);
       $('#serving').innerHTML = serving.map(t => `<tr>
-        <td><span class="chip now">${esc(t.number)}</span></td><td>${who(t)}<div class="small muted">${esc(t.room)} · с ${timeOf(t.calledAt)}</div></td>
+        <td><span class="chip now">${esc(t.number)}</span></td><td>${who(t)}<div class="small muted">${esc(t.room)} · с ${timeOf(t.calledAt)}${plan[t.number] ? ` · до ≈ ${hhmm(plan[t.number].end)}` : ''}</div>${caseCtl(t)}</td>
         <td class="num"><button class="small" data-act="done" data-id="${t.id}">Клиент ушёл ✓</button></td></tr>`).join('') || '<tr><td class="muted">Никого</td></tr>';
       $('#waiting').innerHTML = waiting.map(t => `<tr>
-        <td><span class="chip">${esc(t.number)}</span></td><td>${who(t)}<div class="small muted">${timeOf(t.createdAt)} · ${SOURCE[t.source] || ''}</div></td>
+        <td><span class="chip">${esc(t.number)}</span></td><td>${who(t)}<div class="small muted">пришёл ${timeOf(t.createdAt)} · ${SOURCE[t.source] || ''}${plan[t.number] ? ` · <b>≈ ${hhmm(plan[t.number].start)}</b>` : ''}</div>${caseCtl(t)}</td>
         <td class="num"><button class="small" data-act="call" data-id="${t.id}">Вызвать</button> <button class="small danger" data-act="cancel" data-id="${t.id}">✕</button></td></tr>`).join('') || '<tr><td class="muted">Очереди нет</td></tr>';
       $('#finished').innerHTML = finished.map(t => `<tr><td>${esc(t.number)}</td><td>${who(t)}</td>
-        <td>${t.status === 'done' ? `<span class="badge ok">принят</span> ждал ${minutes(Math.round((t.calledAt - t.createdAt) / 60000))}` : '<span class="badge bad">отменён</span>'}</td><td class="num small muted">${timeOf(t.doneAt)}</td></tr>`).join('') || '<tr><td class="muted">Пока пусто</td></tr>';
+        <td>${t.status === 'done' ? `<span class="badge ok">принят</span> ждал ${minutes(Math.round((t.calledAt - t.createdAt) / 60000))}, приём ${Math.round((t.doneAt - t.calledAt) / 60000)}${t.plannedMin ? '/' + t.plannedMin : ''} мин` : '<span class="badge bad">отменён</span>'}<div class="small muted">${esc(t.caseName)}</div></td><td class="num small muted">${timeOf(t.doneAt)}</td></tr>`).join('') || '<tr><td class="muted">Пока пусто</td></tr>';
+    }
+
+    function caseOptions(selected) {
+      return `<option value="">— кейс не выбран —</option>` + clinic.cases.map(k =>
+        `<option value="${k.id}" ${k.id === selected ? 'selected' : ''}>${esc(k.name)} · ${k.minutes} мин</option>`).join('');
+    }
+
+    function renderCases() {
+      $('#caseBody').innerHTML = clinic.cases.map(k => `<tr data-id="${k.id}">
+        <td><input data-f="name" value="${esc(k.name)}" maxlength="100" style="width:100%"></td>
+        <td><input data-f="minutes" type="number" min="1" max="480" value="${k.minutes}" style="width:80px"></td>
+        <td class="num"><button class="small danger" data-del>✕</button></td></tr>`).join('') || '<tr><td class="muted" colspan="3">Кейсов пока нет</td></tr>';
+      const sel = $('#addForm').caseId;
+      if (document.activeElement !== sel) { const v = sel.value; sel.innerHTML = caseOptions(v); }
     }
 
     function renderEquipment() {
@@ -197,7 +235,10 @@
     async function load() {
       clinic = await api('GET', base());
       $('#clinicName').textContent = clinic.name;
-      renderQueue();
+      $('#timeline').innerHTML = renderTimeline(clinic.timeline);
+      // Не трогаем строки очереди, пока в них выбирают кейс.
+      if (!$('#queueLists').contains(document.activeElement)) renderQueue();
+      if (!$('#caseBody').contains(document.activeElement)) renderCases();
       // Не перерисовываем таблицы, пока в них что-то печатают.
       if (!$('#eqBody').contains(document.activeElement)) renderEquipment();
       if (!$('#priceBody').contains(document.activeElement)) renderPrices();
@@ -223,6 +264,27 @@
       if (r) toast(`Вызван ${r.number}`);
     };
     try { $('#room').value = localStorage.getItem('vq-room') || ''; } catch { /* приватный режим */ }
+    document.querySelector('[data-pane=queue]').onchange = e => {
+      const box = e.target.closest('[data-ticket]');
+      if (!box) return;
+      const f = e.target.dataset.f;
+      act(() => api('PUT', `${base()}/tickets/${box.dataset.ticket}`, { [f]: e.target.value }));
+    };
+    $('#caseBody').onchange = e => {
+      const tr = e.target.closest('tr[data-id]');
+      if (!tr) return;
+      const body = {};
+      tr.querySelectorAll('[data-f]').forEach(i => { body[i.dataset.f] = i.value; });
+      act(() => api('PUT', `${base()}/cases/${tr.dataset.id}`, body));
+    };
+    $('#caseBody').onclick = e => {
+      const tr = e.target.closest('tr[data-id]');
+      if (tr && e.target.matches('[data-del]') && confirm('Удалить кейс?')) act(() => api('DELETE', `${base()}/cases/${tr.dataset.id}`));
+    };
+    $('#caseForm').onsubmit = async e => {
+      e.preventDefault();
+      if (await act(() => api('POST', base() + '/cases', Object.fromEntries(new FormData(e.target))))) e.target.reset();
+    };
     document.querySelector('[data-pane=queue]').onclick = e => {
       const b = e.target.closest('button[data-act]');
       if (!b) return;
@@ -292,7 +354,9 @@
       if (!clinicId) return void (location.href = '/admin.html');
       mountUserBar(user);
       if (!isAdmin()) document.querySelectorAll('.admin').forEach(el => el.classList.add('hidden'));
+      $('#tlLegend').innerHTML = TL_LEGEND;
       await load();
+      setInterval(() => load().catch(() => {}), 60000);
       onLive(({ scope }) => { if (scope === 'clinic:' + clinicId) load(); });
     })().catch(e => toast(e.message, true));
   </script>

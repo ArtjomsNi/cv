@@ -23,7 +23,8 @@
         <h1 style="margin:0">Очереди в клиниках сейчас</h1>
         <input id="search" type="search" placeholder="Поиск: клиника, город, аппарат…" style="width: min(320px, 100%)">
       </div>
-      <p class="muted small">Данные обновляются автоматически. «Ждать ≈» — оценка для того, кто встанет в очередь прямо сейчас.</p>
+      <p class="muted small">Данные обновляются автоматически. Каждый пациент на таймлайне — отрезок длиной в типовое время его случая (его указывает врач или ассистент). Если приём прошёл быстрее, очередь сдвигается и время следующих пациентов пересчитывается.</p>
+      <div id="legend" style="margin-bottom:12px"></div>
       <div class="grid" id="clinicList"><p class="muted">Загрузка…</p></div>
     </section>
 
@@ -62,7 +63,6 @@
     function clinicCard(c) {
       const s = c.stats;
       const serving = s.serving.map(x => `<span class="chip now">${esc(x.number)}${x.room ? ' → ' + esc(x.room) : ''}</span>`).join('') || '<span class="muted small">никого</span>';
-      const waiting = s.waiting.map(n => `<span class="chip">${esc(n)}</span>`).join('') || '<span class="muted small">очереди нет</span>';
       return `<article class="card">
         <h3>${esc(c.name)}</h3>
         <div class="small muted">${esc(c.address)}${c.phone ? ' · <a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>' : ''}</div>
@@ -74,8 +74,8 @@
         </div>
         <div class="small muted">Сейчас на приёме · врачей: ${c.rooms}</div>
         <div class="chips" style="margin: 4px 0 8px">${serving}</div>
-        <div class="small muted">Ожидают</div>
-        <div class="chips" style="margin: 4px 0 8px">${waiting}</div>
+        <div class="small muted">Таймлайн очереди</div>
+        ${renderTimeline(c.timeline, { compact: true })}
         ${c.equipment.length ? `<table><thead><tr><th>Аппарат</th><th>Статус</th><th>Сегодня</th></tr></thead><tbody>${c.equipment.map(equipmentRow).join('')}</tbody></table>` : ''}
         <details><summary>Цены (${c.prices.length})</summary>
           <table>${c.prices.map(p => `<tr><td>${esc(p.name)}${p.note ? ` <span class="small muted">${esc(p.note)}</span>` : ''}</td><td class="num">${money(p.price)}</td></tr>`).join('') || '<tr><td class="muted">Цены не указаны</td></tr>'}</table>
@@ -121,8 +121,10 @@
       if (r) location.href = `/consult.html?id=${encodeURIComponent(r.id)}&t=${encodeURIComponent(r.token)}`;
     };
 
+    $('#legend').innerHTML = TL_LEGEND;
     loadClinics();
     loadVets();
+    setInterval(loadClinics, 60000); // двигаем линию «сейчас»
     onLive(({ scope }) => {
       if (scope.startsWith('clinic:')) loadClinics();
       if (scope === 'vets') loadVets();

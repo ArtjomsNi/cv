@@ -33,6 +33,7 @@ function loadDb() {
     if (e.code !== 'ENOENT') throw e;
     db = emptyDb();
   }
+  for (const c of db.clinics) if (!c.cases) c.cases = defaultCases();
 }
 
 function save() {
@@ -87,12 +88,22 @@ setInterval(() => { for (const res of sseClients) res.write(': ping\n\n'); }, 25
 
 // ---------- доменная логика ----------
 
+// Типовые кейсы и сколько минут на них обычно уходит (диагностика + лечение).
+// Клиника правит список под себя.
+const DEFAULT_CASES = [
+  ['Осмотр / консультация', 20], ['Повторный приём', 15], ['Вакцинация', 15], ['Забор анализов', 10],
+  ['УЗИ', 30], ['Рентген', 20], ['Обработка раны / перевязка', 20], ['Чистка зубов', 60],
+  ['Мелкая операция', 60], ['Срочный случай', 40],
+];
+
+const defaultCases = () => DEFAULT_CASES.map(([name, minutes]) => ({ id: rid(), name, minutes }));
+
 function newClinic({ name, address = '', phone = '', hours = '' }) {
   return {
     id: rid(), name, address, phone, hours, rooms: 1,
     buttonToken: crypto.randomBytes(16).toString('hex'),
     counterDate: null, counter: 0, lastButtonAt: 0,
-    equipment: [], prices: [],
+    equipment: [], prices: [], cases: defaultCases(),
   };
 }
 
@@ -100,48 +111,119 @@ function newUser({ login, password, name, role, clinicId = null, specialization 
   return { id: rid(), login, name, role, clinicId, specialization, online: false, pass: hashPassword(password) };
 }
 
-function createTicket(clinic, { petName = '', ownerName = '', source }) {
+function parseMinutes(v) {
+  const n = parseInt(v, 10);
+  if (!(n >= 1 && n <= 480)) throw new HttpError(400, 'Время: от 1 до 480 минут');
+  return n;
+}
+
+// Кейс выбирает врач или ассистент; время можно поправить вручную для конкретного пациента.
+function applyCase(clinic, t, body) {
+  if (body.caseId !== undefined) {
+    const k = body.caseId ? findIn(clinic.cases, String(body.caseId), 'Кейс') : null;
+    t.caseId = k ? k.id : null;
+    t.caseName = k ? k.name : '';
+    t.plannedMin = k ? k.minutes : null;
+  }
+  if (body.minutes !== undefined && body.minutes !== null && body.minutes !== '') t.plannedMin = parseMinutes(body.minutes);
+}
+
+function createTicket(clinic, { petName = '', ownerName = '', source }, caseBody = {}) {
   const d = today();
-  if (clinic.counterDate !== d) { clinic.counterDate = d; clinic.counter = 0; }
-  clinic.counter += 1;
   const t = {
-    id: rid(), clinicId: clinic.id, date: d, number: clinic.counter,
+    id: rid(), clinicId: clinic.id, date: d, number: 0,
     petName, ownerName, source, status: 'waiting', room: '',
+    caseId: null, caseName: '', plannedMin: null,
     createdAt: Date.now(), calledAt: null, doneAt: null,
   };
+  applyCase(clinic, t, caseBody);
+  if (clinic.counterDate !== d) { clinic.counterDate = d; clinic.counter = 0; }
+  clinic.counter += 1;
+  t.number = clinic.counter;
   db.tickets.push(t);
   changed('clinic:' + clinic.id);
   return t;
 }
 
 const avg = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const MIN_MS = 60000;
+const TIMELINE_HISTORY_MS = 3 * 60 * MIN_MS;
 
 function todaysTickets(clinicId) {
   const d = today();
   return db.tickets.filter(t => t.clinicId === clinicId && t.date === d);
 }
 
-function clinicStats(c) {
+// Таймлайн: каждый пациент — отрезок длиной в ожидаемое время его кейса.
+// Отрезки раскладываются по «дорожкам» (врачам на приёме). Если пациент ушёл раньше,
+// дорожка освобождается раньше и все следующие отрезки сдвигаются влево — так видно,
+// когда примерно будет следующий.
+function timeline(c) {
+  const now = Date.now();
+  const ts = todaysTickets(c.id);
+  const done = ts.filter(t => t.status === 'done' && t.calledAt);
+  const serving = ts.filter(t => t.status === 'in_service');
+  const waiting = ts.filter(t => t.status === 'waiting').sort((a, b) => a.createdAt - b.createdAt);
+  const avgService = avg(done.map(t => t.doneAt - t.calledAt));
+  const fallbackMin = avgService ? Math.max(1, Math.round(avgService / MIN_MS)) : DEFAULT_SERVICE_MIN;
+  const plan = t => t.plannedMin || fallbackMin;
+  const lanes = Math.max(1, c.rooms || 1, serving.length);
+  const laneEnd = Array(lanes).fill(0);
+  const items = [];
+  const base = t => ({ number: ticketNo(t.number), caseName: t.caseName, plannedMin: plan(t), caseKnown: !!t.plannedMin, room: t.room });
+
+  for (const t of [...done, ...serving].sort((a, b) => a.calledAt - b.calledAt)) {
+    let lane = laneEnd.findIndex(e => e <= t.calledAt + MIN_MS);
+    if (lane < 0) lane = laneEnd.indexOf(Math.min(...laneEnd));
+    if (t.status === 'done') {
+      laneEnd[lane] = t.doneAt;
+      if (t.doneAt > now - TIMELINE_HISTORY_MS) {
+        items.push({ ...base(t), status: 'done', lane, start: t.calledAt, end: t.doneAt, actualMin: Math.round((t.doneAt - t.calledAt) / MIN_MS) });
+      }
+    } else {
+      const plannedEnd = t.calledAt + plan(t) * MIN_MS;
+      laneEnd[lane] = Math.max(plannedEnd, now);
+      items.push({ ...base(t), status: 'in_service', lane, start: t.calledAt, end: laneEnd[lane], plannedEnd, overdue: now > plannedEnd });
+    }
+  }
+
+  for (const t of waiting) {
+    let lane = 0;
+    for (let i = 1; i < lanes; i++) if (Math.max(laneEnd[i], now) < Math.max(laneEnd[lane], now)) lane = i;
+    const start = Math.max(laneEnd[lane], now);
+    laneEnd[lane] = start + plan(t) * MIN_MS;
+    items.push({ ...base(t), status: 'waiting', lane, start, end: laneEnd[lane], waitMin: Math.round((start - now) / MIN_MS) });
+  }
+
+  // Темп: насколько фактическое время приёмов отличается от запланированного по кейсам.
+  const measured = done.filter(t => t.plannedMin);
+  const plannedSum = measured.reduce((s, t) => s + t.plannedMin * MIN_MS, 0);
+  const actualSum = measured.reduce((s, t) => s + (t.doneAt - t.calledAt), 0);
+  const nextFreeAt = Math.max(now, Math.min(...laneEnd));
+  return {
+    now, lanes, items, fallbackMin, nextFreeAt,
+    newClientWaitMin: Math.round((nextFreeAt - now) / MIN_MS),
+    aheadMin: plannedSum ? Math.round((plannedSum - actualSum) / MIN_MS) : null,
+    pacePct: plannedSum ? Math.round(actualSum / plannedSum * 100) : null,
+  };
+}
+
+function clinicStats(c, tl = timeline(c)) {
   const ts = todaysTickets(c.id);
   const waiting = ts.filter(t => t.status === 'waiting').sort((a, b) => a.createdAt - b.createdAt);
   const serving = ts.filter(t => t.status === 'in_service');
   const done = ts.filter(t => t.status === 'done' && t.calledAt);
   const avgWait = avg(ts.filter(t => t.calledAt).map(t => t.calledAt - t.createdAt));
   const avgService = avg(done.map(t => t.doneAt - t.calledAt));
-  const serviceMin = avgService ? avgService / 60000 : DEFAULT_SERVICE_MIN;
-  const rooms = Math.max(1, c.rooms || 1);
-  // Сколько ждать пациенту, перед которым `ahead` человек в очереди.
-  const estimate = ahead => Math.round(Math.max(0, ahead + serving.length - rooms + 1) * serviceMin / rooms);
   return {
     waitingCount: waiting.length,
     servingCount: serving.length,
     servedToday: done.length,
-    avgWaitMin: avgWait == null ? null : Math.round(avgWait / 60000),
-    avgServiceMin: avgService == null ? null : Math.round(avgService / 60000),
-    estimatedWaitMin: estimate(waiting.length),
+    avgWaitMin: avgWait == null ? null : Math.round(avgWait / MIN_MS),
+    avgServiceMin: avgService == null ? null : Math.round(avgService / MIN_MS),
+    estimatedWaitMin: tl.newClientWaitMin,
     waiting: waiting.map(t => ticketNo(t.number)),
     serving: serving.map(t => ({ number: ticketNo(t.number), room: t.room })),
-    estimate,
   };
 }
 
@@ -153,17 +235,19 @@ function publicEquipment(e) {
 }
 
 function publicClinic(c) {
-  const { estimate, ...stats } = clinicStats(c);
+  const tl = timeline(c);
   return {
     id: c.id, name: c.name, address: c.address, phone: c.phone, hours: c.hours, rooms: c.rooms,
-    stats, equipment: c.equipment.map(publicEquipment), prices: c.prices,
+    stats: clinicStats(c, tl), timeline: tl, equipment: c.equipment.map(publicEquipment), prices: c.prices,
   };
 }
 
 function ticketResponse(clinic, t) {
-  const stats = clinicStats(clinic);
-  const ahead = stats.waiting.indexOf(ticketNo(t.number));
-  return { number: ticketNo(t.number), position: ahead + 1, estimatedWaitMin: stats.estimate(ahead) };
+  const tl = timeline(clinic);
+  const number = ticketNo(t.number);
+  const waiting = tl.items.filter(i => i.status === 'waiting');
+  const idx = waiting.findIndex(i => i.number === number);
+  return { number, position: idx + 1, estimatedWaitMin: idx >= 0 ? waiting[idx].waitMin : 0, startAt: idx >= 0 ? waiting[idx].start : null };
 }
 
 const publicVet = v => ({ id: v.id, name: v.name, specialization: v.specialization, online: !!v.online });
@@ -371,6 +455,7 @@ route('GET', '/api/clinics/:id', ({ p, user }) => {
   return {
     ...publicClinic(c),
     equipment: c.equipment.map(e => ({ ...publicEquipment(e), specialistName: e.specialist })),
+    cases: c.cases,
     buttonToken: isAdmin ? c.buttonToken : undefined,
     tickets: todaysTickets(c.id).map(t => ({ ...t, number: ticketNo(t.number) })),
   };
@@ -379,7 +464,18 @@ route('GET', '/api/clinics/:id', ({ p, user }) => {
 route('POST', '/api/clinics/:id/tickets', ({ p, user, body }) => {
   requireClinic(user, p.id);
   const c = findClinic(p.id);
-  return ticketResponse(c, createTicket(c, { source: 'staff', petName: str(body.petName, 100), ownerName: str(body.ownerName, 100) }));
+  return ticketResponse(c, createTicket(c, { source: 'staff', petName: str(body.petName, 100), ownerName: str(body.ownerName, 100) }, body));
+});
+
+// Врач/ассистент указывает или меняет кейс пациента (и при необходимости время).
+route('PUT', '/api/clinics/:id/tickets/:tid', ({ p, user, body }) => {
+  requireClinic(user, p.id);
+  const c = findClinic(p.id);
+  const t = findTicket(p.id, p.tid);
+  if (t.status === 'done' || t.status === 'cancelled') throw new HttpError(409, 'Приём уже закрыт');
+  applyCase(c, t, body);
+  changed('clinic:' + p.id);
+  return { ok: true };
 });
 
 function callTicket(t, room) {
@@ -505,6 +601,37 @@ route('DELETE', '/api/clinics/:id/prices/:pid', ({ p, user }) => {
   const c = findClinic(p.id);
   findIn(c.prices, p.pid, 'Услуга');
   c.prices = c.prices.filter(x => x.id !== p.pid);
+  changed('clinic:' + p.id);
+  return { ok: true };
+});
+
+// Клиника: кейсы и их типовое время. Править могут все сотрудники клиники —
+// врачи лучше всех знают, сколько занимает диагностика и лечение.
+
+function caseFields(body) {
+  return { name: required(body.name, 'Кейс', 100), minutes: parseMinutes(body.minutes) };
+}
+
+route('POST', '/api/clinics/:id/cases', ({ p, user, body }) => {
+  requireClinic(user, p.id);
+  const k = { id: rid(), ...caseFields(body) };
+  findClinic(p.id).cases.push(k);
+  changed('clinic:' + p.id);
+  return k;
+});
+
+route('PUT', '/api/clinics/:id/cases/:kid', ({ p, user, body }) => {
+  requireClinic(user, p.id);
+  Object.assign(findIn(findClinic(p.id).cases, p.kid, 'Кейс'), caseFields(body));
+  changed('clinic:' + p.id);
+  return { ok: true };
+});
+
+route('DELETE', '/api/clinics/:id/cases/:kid', ({ p, user }) => {
+  requireClinic(user, p.id);
+  const c = findClinic(p.id);
+  findIn(c.cases, p.kid, 'Кейс');
+  c.cases = c.cases.filter(k => k.id !== p.kid);
   changed('clinic:' + p.id);
   return { ok: true };
 });
@@ -712,7 +839,18 @@ function seedDemo() {
     newUser({ login: 'vet-olga', password: 'demo123', name: 'Ольга Петрова', role: 'remote_vet', specialization: 'Экзотические животные, птицы' }),
   );
 
-  for (const pet of ['Барсик', 'Рекс', 'Мурка', 'Шарик']) createTicket(lapa, { source: 'staff', petName: pet });
+  const caseId = name => lapa.cases.find(k => k.name === name).id;
+  const now = Date.now();
+  const demo = [
+    ['Тузик', 'Вакцинация', -50, -45, -36], ['Снежок', 'УЗИ', -45, -40, -15], ['Барсик', 'Осмотр / консультация', -30, -12],
+    ['Рекс', 'Обработка раны / перевязка', -20, -8], ['Мурка', 'Вакцинация', -15], ['Шарик', 'Рентген', -10], ['Пушок', null, -5],
+  ];
+  for (const [pet, kase, created, called, doneAt] of demo) {
+    const t = createTicket(lapa, { source: 'staff', petName: pet }, kase ? { caseId: caseId(kase) } : {});
+    t.createdAt = now + created * MIN_MS;
+    if (called) { t.status = 'in_service'; t.calledAt = now + called * MIN_MS; t.room = 'Каб. ' + (t.number % 2 + 1); }
+    if (doneAt) { t.status = 'done'; t.doneAt = now + doneAt * MIN_MS; }
+  }
   console.log('Демо-данные: lapa-admin / lapa-reg / vet-ivars / vet-olga — пароль demo123');
 }
 

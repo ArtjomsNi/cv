@@ -77,3 +77,28 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 code { background: var(--bg); padding: 1px 5px; border-radius: 4px; word-break: break-all; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 760px) { .two { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); } }
+
+/* Таймлайн очереди */
+.tl { display: flex; margin: 10px 0 4px; font-size: 12px; }
+.tl-labels { flex: 0 0 auto; padding-right: 6px; color: var(--muted); }
+.tl-labels div { height: 30px; line-height: 30px; margin-bottom: 4px; white-space: nowrap; }
+.tl-labels div:first-child { height: 18px; line-height: 18px; }
+.tl-scroll { flex: 1; overflow-x: auto; }
+.tl-inner { position: relative; min-width: 640px; }
+.tl.compact .tl-inner { min-width: 520px; }
+.tl-axis { position: relative; height: 18px; color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.tl-axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.tl-row { position: relative; height: 30px; margin-bottom: 4px; background: var(--bg); border-radius: 6px; }
+.tl-bar { position: absolute; top: 2px; bottom: 2px; border-radius: 5px; padding: 0 6px; line-height: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; border: 1px solid transparent; box-sizing: border-box; }
+.tl-bar.done { background: var(--line); color: var(--muted); }
+.tl-bar.done.fast { background: var(--ok-soft); color: var(--ok); }
+.tl-bar.done.slow { background: var(--warn-soft); color: var(--warn); }
+.tl-bar.in_service { color: #fff; background: linear-gradient(90deg, var(--accent) var(--p), color-mix(in srgb, var(--accent) 65%, transparent) var(--p)); }
+.tl-bar.in_service.overdue { background: var(--bad); }
+.tl-bar.waiting { background: var(--card); border: 1px dashed var(--accent); color: var(--text); }
+.tl-bar.waiting.unknown { border-color: var(--muted); color: var(--muted); }
+.tl-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--bad); }
+.tl-now span { position: absolute; top: 0; left: 4px; font-size: 10px; color: var(--bad); background: var(--card); padding: 0 2px; }
+.tl-summary { font-size: 13px; margin-bottom: 8px; }
+.tl-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.tl-legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }

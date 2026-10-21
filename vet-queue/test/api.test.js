@@ -37,8 +37,8 @@ test('публичный список клиник со статистикой, 
   const { data } = await call('GET', '/api/public/clinics');
   assert.strictEqual(data.length, 2);
   const lapa = data.find(c => c.name.includes('Лапа'));
-  assert.strictEqual(lapa.stats.waitingCount, 4);
-  assert.deepStrictEqual(lapa.stats.waiting, ['001', '002', '003', '004']);
+  assert.strictEqual(lapa.stats.waitingCount, 3);
+  assert.deepStrictEqual(lapa.stats.waiting, ['005', '006', '007']);
   assert.ok(lapa.equipment.some(e => !e.working));
   assert.ok(lapa.prices.length > 0);
   assert.strictEqual(lapa.buttonToken, undefined, 'ключ кнопки не должен быть публичным');
@@ -47,23 +47,22 @@ test('публичный список клиник со статистикой, 
 test('client in / client out через кабинет персонала', async () => {
   const cookie = await login('lapa-reg');
   const me = (await call('GET', '/api/me', undefined, cookie)).data;
-  const add = await call('POST', `/api/clinics/${me.clinicId}/tickets`, { petName: 'Тузик' }, cookie);
-  assert.strictEqual(add.data.number, '005');
-  assert.strictEqual(add.data.position, 5);
+  const add = await call('POST', `/api/clinics/${me.clinicId}/tickets`, { petName: 'Бим' }, cookie);
+  assert.strictEqual(add.data.number, '008');
+  assert.strictEqual(add.data.position, 4);
 
   const next = await call('POST', `/api/clinics/${me.clinicId}/call-next`, { room: 'Каб. 1' }, cookie);
-  assert.strictEqual(next.data.number, '001');
+  assert.strictEqual(next.data.number, '005');
 
   const full = (await call('GET', `/api/clinics/${me.clinicId}`, undefined, cookie)).data;
-  const t = full.tickets.find(x => x.number === '001');
+  const t = full.tickets.find(x => x.number === '005');
   assert.strictEqual(t.status, 'in_service');
   assert.strictEqual(full.buttonToken, undefined, 'персонал не видит ключ кнопки');
 
   assert.strictEqual((await call('POST', `/api/clinics/${me.clinicId}/tickets/${t.id}/done`, {}, cookie)).status, 200);
   const pub = (await call('GET', `/api/public/clinics/${me.clinicId}`)).data;
-  assert.strictEqual(pub.stats.servedToday, 1);
-  assert.strictEqual(pub.stats.waitingCount, 4);
-  assert.strictEqual(pub.stats.avgWaitMin, 0);
+  assert.strictEqual(pub.stats.servedToday, 3);
+  assert.strictEqual(pub.stats.waitingCount, 3);
 });
 
 test('персонал не может управлять чужой клиникой и ценами', async () => {
@@ -128,4 +127,46 @@ test('у каждого сотрудника свой логин; запрос �
 
   const res = await fetch(`${BASE}/api/clinics/${me.clinicId}/tickets`, { method: 'POST', headers: { Cookie: admin, 'Content-Type': 'text/plain' }, body: '{}' });
   assert.strictEqual(res.status, 415);
+});
+
+test('таймлайн: отрезки по кейсам, сдвиг при раннем завершении', async () => {
+  const cookie = await login('lapa-admin');
+  const me = (await call('GET', '/api/me', undefined, cookie)).data;
+  const url = `/api/clinics/${me.clinicId}`;
+  await call('PUT', url + '/settings', { rooms: 1 }, cookie);
+  // Закрываем всё, что осталось от предыдущих тестов.
+  for (const t of (await call('GET', url, undefined, cookie)).data.tickets) {
+    if (t.status === 'waiting' || t.status === 'in_service') await call('POST', `${url}/tickets/${t.id}/cancel`, {}, cookie);
+  }
+  const { cases } = (await call('GET', url, undefined, cookie)).data;
+  const k = await call('POST', url + '/cases', { name: 'Тестовый кейс', minutes: 40 }, cookie);
+  assert.strictEqual(k.data.minutes, 40);
+  const vacc = cases.find(c => c.name === 'Вакцинация');
+
+  const a = await call('POST', url + '/tickets', { petName: 'A', caseId: k.data.id }, cookie);
+  const b = await call('POST', url + '/tickets', { petName: 'B', caseId: vacc.id }, cookie);
+  assert.strictEqual(a.data.estimatedWaitMin, 0);
+  assert.strictEqual(b.data.estimatedWaitMin, 40, 'B ждёт, пока идёт 40-минутный кейс A');
+
+  await call('POST', url + '/call-next', {}, cookie);
+  let tl = (await call('GET', `/api/public/clinics/${me.clinicId}`)).data.timeline;
+  const bItem = tl.items.find(i => i.number === b.data.number);
+  assert.strictEqual(bItem.waitMin, 40);
+
+  // Врач уточнил кейс пациента B после осмотра — своё время.
+  const full = (await call('GET', url, undefined, cookie)).data;
+  const tb = full.tickets.find(t => t.number === b.data.number);
+  assert.strictEqual((await call('PUT', `${url}/tickets/${tb.id}`, { minutes: 25 }, cookie)).status, 200);
+  assert.strictEqual((await call('PUT', `${url}/tickets/${tb.id}`, { minutes: 0 }, cookie)).status, 400);
+
+  // A ушёл намного раньше плана — B сдвигается на «сейчас», темп быстрее плана.
+  const ta = full.tickets.find(t => t.number === a.data.number);
+  await call('POST', `${url}/tickets/${ta.id}/done`, {}, cookie);
+  tl = (await call('GET', `/api/public/clinics/${me.clinicId}`)).data.timeline;
+  const b2 = tl.items.find(i => i.number === b.data.number);
+  assert.strictEqual(b2.waitMin, 0);
+  assert.strictEqual(b2.plannedMin, 25);
+  assert.strictEqual(tl.items.find(i => i.number === a.data.number).status, 'done');
+  assert.ok(tl.aheadMin >= 39, 'опережаем план почти на 40 минут');
+  assert.strictEqual(tl.newClientWaitMin, 25);
 });
