@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ваша заявка на консультацию</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top"><a class="logo" href="/">🐾 ВетОчередь</a></header>
+  <main style="max-width: 640px">
+    <div class="card" id="box">Загрузка…</div>
+    <p class="small muted">Сохраните ссылку на эту страницу — по ней можно вернуться к заявке.</p>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const url = `/api/public/consultations/${encodeURIComponent(params.get('id'))}?t=${encodeURIComponent(params.get('t'))}`;
+
+    async function load() {
+      const c = await api('GET', url);
+      const vet = c.vet ? esc(c.vet.name) : 'врач';
+      const views = {
+        new: `<h2>⏳ Ждём ответа</h2><p>Заявка отправлена: ${vet}. Как только врач примет её, здесь появится ссылка на видеозвонок. Страницу можно не обновлять.</p>`,
+        accepted: `<h2>✅ Врач готов</h2><p>${vet} ждёт вас в видеозвонке.</p><a class="btn" href="${esc(c.roomUrl)}" target="_blank" rel="noopener">Подключиться к видеозвонку</a>`,
+        declined: `<h2>Врач не может ответить</h2><p>${vet} сейчас не может взять консультацию. <a href="/#vets">Выберите другого врача</a>.</p>`,
+        done: `<h2>Консультация завершена</h2><p>Спасибо! Здоровья вашему питомцу.</p>`,
+      };
+      $('#box').innerHTML = views[c.status] || esc(c.status);
+    }
+    load().catch(e => { $('#box').textContent = e.message; });
+    onLive(({ scope }) => { if (scope === 'consult') load(); });
+  </script>
+</body>
+</html>

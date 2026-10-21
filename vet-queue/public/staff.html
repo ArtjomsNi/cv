@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Клиника — ВетОчередь</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">🐾 ВетОчередь</a>
+    <strong id="clinicName"></strong>
+    <span class="spacer"></span>
+    <span class="row" id="userbar"></span>
+  </header>
+  <main>
+    <div class="tabs" id="tabs">
+      <button data-tab="queue" class="active">Очередь</button>
+      <button data-tab="equipment">Аппараты</button>
+      <button data-tab="prices" class="admin">Цены</button>
+      <button data-tab="users" class="admin">Сотрудники</button>
+      <button data-tab="settings">Настройки и кнопки</button>
+    </div>
+
+    <!-- Очередь -->
+    <section data-pane="queue">
+      <div class="stats" id="stats"></div>
+      <div class="two">
+        <div class="card">
+          <h3>Клиент пришёл</h3>
+          <form class="row" id="addForm">
+            <input name="ownerName" placeholder="Владелец" maxlength="100" style="flex:1">
+            <input name="petName" placeholder="Питомец" maxlength="100" style="flex:1">
+            <button type="submit">+ В очередь</button>
+          </form>
+          <p class="small muted">Можно оставить поля пустыми — клиент получит номер.</p>
+        </div>
+        <div class="card">
+          <h3>Вызвать следующего</h3>
+          <form class="row" id="nextForm">
+            <input name="room" id="room" placeholder="Кабинет / врач" maxlength="30" style="flex:1">
+            <button type="submit">Вызвать ▶</button>
+          </form>
+          <p class="small muted">Номер появится на табло и на сайте.</p>
+        </div>
+      </div>
+      <div class="two" style="margin-top:16px">
+        <div class="card"><h3>На приёме</h3><table id="serving"></table></div>
+        <div class="card"><h3>Ожидают</h3><table id="waiting"></table></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <details><summary>Завершённые и отменённые сегодня</summary><table id="finished"></table></details>
+      </div>
+    </section>
+
+    <!-- Аппараты -->
+    <section data-pane="equipment" class="hidden">
+      <div class="card">
+        <p class="small muted">Отметьте, работает ли аппарат и есть ли сегодня специалист. Отметка «специалист сегодня» автоматически сбрасывается на следующий день.</p>
+        <table>
+          <thead><tr><th>Аппарат</th><th>Работает</th><th>Специалист сегодня</th><th>Кто</th><th>Примечание</th><th></th></tr></thead>
+          <tbody id="eqBody"></tbody>
+        </table>
+        <form class="row admin" id="eqForm" style="margin-top:12px">
+          <input name="name" placeholder="Новый аппарат (например, МРТ)" required maxlength="100" style="flex:1">
+          <button type="submit">Добавить</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Цены -->
+    <section data-pane="prices" class="hidden">
+      <div class="card">
+        <table>
+          <thead><tr><th>Услуга</th><th>Цена, €</th><th>Примечание</th><th></th></tr></thead>
+          <tbody id="priceBody"></tbody>
+        </table>
+        <form class="row" id="priceForm" style="margin-top:12px">
+          <input name="name" placeholder="Услуга" required maxlength="150" style="flex:2">
+          <input name="price" placeholder="Цена" required inputmode="decimal" style="width:100px">
+          <input name="note" placeholder="Примечание" maxlength="150" style="flex:1">
+          <button type="submit">Добавить</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Сотрудники -->
+    <section data-pane="users" class="hidden">
+      <div class="two">
+        <div class="card"><h3>Сотрудники клиники</h3><table id="userBody"></table></div>
+        <form class="card stack" id="userForm">
+          <h3>Новый сотрудник</h3>
+          <label class="field">Имя<input name="name" required maxlength="100"></label>
+          <label class="field">Логин<input name="login" required pattern="[a-zA-Z0-9._\-]{3,50}" autocapitalize="off"></label>
+          <label class="field">Пароль (мин. 6)<input name="password" required minlength="6"></label>
+          <label class="field">Роль
+            <select name="role"><option value="staff">Персонал (очередь, аппараты)</option><option value="clinic_admin">Администратор клиники</option></select>
+          </label>
+          <button type="submit">Создать логин</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Настройки -->
+    <section data-pane="settings" class="hidden">
+      <div class="two">
+        <form class="card stack" id="settingsForm">
+          <h3>Клиника</h3>
+          <label class="field">Врачей на приёме сейчас (для расчёта ожидания)<input name="rooms" type="number" min="1" max="50"></label>
+          <div class="admin stack" style="display:flex">
+            <label class="field">Название<input name="name" maxlength="100"></label>
+            <label class="field">Адрес<input name="address" maxlength="200"></label>
+            <label class="field">Телефон<input name="phone" maxlength="200"></label>
+            <label class="field">Часы работы<input name="hours" maxlength="200"></label>
+          </div>
+          <button type="submit">Сохранить</button>
+        </form>
+        <div class="card admin">
+          <h3>Кнопки очереди</h3>
+          <p><b>Цифровая кнопка (планшет у входа):</b><br><a id="kioskLink" target="_blank"></a></p>
+          <p><b>Табло для телевизора в зале:</b><br><a id="displayLink" target="_blank"></a></p>
+          <p><b>Физическая кнопка</b> (ESP32 / любое устройство с Wi-Fi) отправляет запрос:<br><code id="buttonCurl"></code></p>
+          <p class="small muted">Прошивка для ESP32 — в папке <code>device/</code> проекта. Если ключ попал в чужие руки — сгенерируйте новый (старые кнопки и киоски перестанут работать).</p>
+          <button class="danger" id="rotateBtn">Сгенерировать новый ключ</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+  <script>
+    let user, clinicId, clinic;
+    const base = () => '/api/clinics/' + encodeURIComponent(clinicId);
+    const isAdmin = () => user.role !== 'staff';
+    const SOURCE = { staff: 'регистратура', kiosk: 'планшет', button: 'кнопка' };
+
+    // Вкладки
+    $('#tabs').onclick = e => {
+      const b = e.target.closest('button[data-tab]');
+      if (!b) return;
+      document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('active', x === b));
+      document.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== b.dataset.tab));
+      if (b.dataset.tab === 'users') loadUsers();
+    };
+
+    function renderQueue() {
+      const s = clinic.stats;
+      $('#stats').innerHTML = `
+        <div class="stat"><b>${s.waitingCount}</b><span>в очереди</span></div>
+        <div class="stat"><b>${minutes(s.avgWaitMin)}</b><span>ср. ожидание · ≈ ${minutes(s.estimatedWaitMin)} для нового</span></div>
+        <div class="stat"><b>${s.servedToday}</b><span>принято сегодня · приём ≈ ${minutes(s.avgServiceMin)}</span></div>`;
+      const who = t => `${esc(t.ownerName)}${t.ownerName && t.petName ? ' · ' : ''}${esc(t.petName)}` || '<span class="muted">—</span>';
+      const byTime = (a, b) => a.createdAt - b.createdAt;
+      const serving = clinic.tickets.filter(t => t.status === 'in_service').sort(byTime);
+      const waiting = clinic.tickets.filter(t => t.status === 'waiting').sort(byTime);
+      const finished = clinic.tickets.filter(t => t.status === 'done' || t.status === 'cancelled').sort((a, b) => b.doneAt - a.doneAt);
+      $('#serving').innerHTML = serving.map(t => `<tr>
+        <td><span class="chip now">${esc(t.number)}</span></td><td>${who(t)}<div class="small muted">${esc(t.room)} · с ${timeOf(t.calledAt)}</div></td>
+        <td class="num"><button class="small" data-act="done" data-id="${t.id}">Клиент ушёл ✓</button></td></tr>`).join('') || '<tr><td class="muted">Никого</td></tr>';
+      $('#waiting').innerHTML = waiting.map(t => `<tr>
+        <td><span class="chip">${esc(t.number)}</span></td><td>${who(t)}<div class="small muted">${timeOf(t.createdAt)} · ${SOURCE[t.source] || ''}</div></td>
+        <td class="num"><button class="small" data-act="call" data-id="${t.id}">Вызвать</button> <button class="small danger" data-act="cancel" data-id="${t.id}">✕</button></td></tr>`).join('') || '<tr><td class="muted">Очереди нет</td></tr>';
+      $('#finished').innerHTML = finished.map(t => `<tr><td>${esc(t.number)}</td><td>${who(t)}</td>
+        <td>${t.status === 'done' ? `<span class="badge ok">принят</span> ждал ${minutes(Math.round((t.calledAt - t.createdAt) / 60000))}` : '<span class="badge bad">отменён</span>'}</td><td class="num small muted">${timeOf(t.doneAt)}</td></tr>`).join('') || '<tr><td class="muted">Пока пусто</td></tr>';
+    }
+
+    function renderEquipment() {
+      $('#eqBody').innerHTML = clinic.equipment.map(e => `<tr data-id="${e.id}">
+        <td>${esc(e.name)}</td>
+        <td><input type="checkbox" data-f="working" ${e.working ? 'checked' : ''}></td>
+        <td><input type="checkbox" data-f="specialistToday" ${e.specialistToday ? 'checked' : ''}></td>
+        <td><input data-f="specialist" value="${esc(e.specialistName)}" placeholder="Имя" maxlength="100" style="width:130px"></td>
+        <td><input data-f="note" value="${esc(e.note)}" placeholder="—" maxlength="200" style="width:150px"></td>
+        <td class="num">${isAdmin() ? '<button class="small danger" data-del>✕</button>' : ''}</td></tr>`).join('') || '<tr><td class="muted" colspan="6">Аппаратов пока нет</td></tr>';
+    }
+
+    function renderPrices() {
+      $('#priceBody').innerHTML = clinic.prices.map(p => `<tr data-id="${p.id}">
+        <td><input data-f="name" value="${esc(p.name)}" maxlength="150" style="width:100%"></td>
+        <td><input data-f="price" value="${p.price}" inputmode="decimal" style="width:90px"></td>
+        <td><input data-f="note" value="${esc(p.note)}" maxlength="150" style="width:100%"></td>
+        <td class="num"><button class="small danger" data-del>✕</button></td></tr>`).join('') || '<tr><td class="muted" colspan="4">Цен пока нет</td></tr>';
+    }
+
+    function renderSettings() {
+      const f = $('#settingsForm');
+      for (const k of ['rooms', 'name', 'address', 'phone', 'hours']) if (document.activeElement !== f[k]) f[k].value = clinic[k] ?? '';
+      if (!isAdmin()) return;
+      const origin = location.origin;
+      const kiosk = `${origin}/kiosk.html?clinic=${encodeURIComponent(clinicId)}&key=${clinic.buttonToken}`;
+      const display = `${origin}/display.html?clinic=${encodeURIComponent(clinicId)}`;
+      $('#kioskLink').href = $('#kioskLink').textContent = kiosk;
+      $('#displayLink').href = $('#displayLink').textContent = display;
+      $('#buttonCurl').textContent = `curl -X POST ${origin}/api/button/${clinic.buttonToken}`;
+    }
+
+    async function load() {
+      clinic = await api('GET', base());
+      $('#clinicName').textContent = clinic.name;
+      renderQueue();
+      // Не перерисовываем таблицы, пока в них что-то печатают.
+      if (!$('#eqBody').contains(document.activeElement)) renderEquipment();
+      if (!$('#priceBody').contains(document.activeElement)) renderPrices();
+      renderSettings();
+    }
+
+    async function loadUsers() {
+      const users = await api('GET', base() + '/users');
+      $('#userBody').innerHTML = users.map(u => `<tr><td>${esc(u.name)}<div class="small muted">${esc(u.login)}</div></td>
+        <td>${ROLE_NAMES[u.role]}</td><td class="num">${u.id === user.id ? '' : `<button class="small danger" data-uid="${u.id}">Удалить</button>`}</td></tr>`).join('');
+    }
+
+    // Очередь
+    $('#addForm').onsubmit = async e => {
+      e.preventDefault();
+      const r = await act(() => api('POST', base() + '/tickets', Object.fromEntries(new FormData(e.target))));
+      if (r) { toast(`Номер ${r.number}, ждать ≈ ${minutes(r.estimatedWaitMin)}`); e.target.reset(); }
+    };
+    $('#nextForm').onsubmit = async e => {
+      e.preventDefault();
+      localStorage.setItem('vq-room', $('#room').value);
+      const r = await act(() => api('POST', base() + '/call-next', { room: $('#room').value }));
+      if (r) toast(`Вызван ${r.number}`);
+    };
+    try { $('#room').value = localStorage.getItem('vq-room') || ''; } catch { /* приватный режим */ }
+    document.querySelector('[data-pane=queue]').onclick = e => {
+      const b = e.target.closest('button[data-act]');
+      if (!b) return;
+      if (b.dataset.act === 'cancel' && !confirm('Убрать из очереди?')) return;
+      act(() => api('POST', `${base()}/tickets/${b.dataset.id}/${b.dataset.act}`, { room: $('#room').value }));
+    };
+
+    // Аппараты
+    $('#eqBody').onchange = e => {
+      const tr = e.target.closest('tr[data-id]');
+      const f = e.target.dataset.f;
+      if (!tr || !f) return;
+      const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+      act(() => api('PUT', `${base()}/equipment/${tr.dataset.id}`, { [f]: val }));
+    };
+    $('#eqBody').onclick = e => {
+      const tr = e.target.closest('tr[data-id]');
+      if (tr && e.target.matches('[data-del]') && confirm('Удалить аппарат?')) act(() => api('DELETE', `${base()}/equipment/${tr.dataset.id}`));
+    };
+    $('#eqForm').onsubmit = async e => {
+      e.preventDefault();
+      if (await act(() => api('POST', base() + '/equipment', Object.fromEntries(new FormData(e.target))))) e.target.reset();
+    };
+
+    // Цены
+    $('#priceBody').onchange = e => {
+      const tr = e.target.closest('tr[data-id]');
+      if (!tr) return;
+      const body = {};
+      tr.querySelectorAll('[data-f]').forEach(i => { body[i.dataset.f] = i.value; });
+      act(() => api('PUT', `${base()}/prices/${tr.dataset.id}`, body));
+    };
+    $('#priceBody').onclick = e => {
+      const tr = e.target.closest('tr[data-id]');
+      if (tr && e.target.matches('[data-del]') && confirm('Удалить услугу?')) act(() => api('DELETE', `${base()}/prices/${tr.dataset.id}`));
+    };
+    $('#priceForm').onsubmit = async e => {
+      e.preventDefault();
+      if (await act(() => api('POST', base() + '/prices', Object.fromEntries(new FormData(e.target))))) e.target.reset();
+    };
+
+    // Сотрудники
+    $('#userForm').onsubmit = async e => {
+      e.preventDefault();
+      if (await act(() => api('POST', base() + '/users', Object.fromEntries(new FormData(e.target))))) { e.target.reset(); toast('Логин создан'); loadUsers(); }
+    };
+    $('#userBody').onclick = async e => {
+      const id = e.target.dataset.uid;
+      if (id && confirm('Удалить сотрудника? Его логин перестанет работать.') && await act(() => api('DELETE', `${base()}/users/${id}`))) loadUsers();
+    };
+
+    // Настройки
+    $('#settingsForm').onsubmit = async e => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(e.target));
+      if (await act(() => api('PUT', base() + '/settings', body))) toast('Сохранено');
+    };
+    $('#rotateBtn').onclick = async () => {
+      if (!confirm('Старые кнопки и киоски перестанут работать. Продолжить?')) return;
+      if (await act(() => api('POST', base() + '/button-token'))) load();
+    };
+
+    (async () => {
+      user = await api('GET', '/api/me');
+      if (user.role === 'remote_vet') return void (location.href = '/vet.html');
+      clinicId = user.role === 'superadmin' ? new URLSearchParams(location.search).get('clinic') : user.clinicId;
+      if (!clinicId) return void (location.href = '/admin.html');
+      mountUserBar(user);
+      if (!isAdmin()) document.querySelectorAll('.admin').forEach(el => el.classList.add('hidden'));
+      await load();
+      onLive(({ scope }) => { if (scope === 'clinic:' + clinicId) load(); });
+    })().catch(e => toast(e.message, true));
+  </script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Администрирование — ВетОчередь</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">🐾 ВетОчередь</a>
+    <strong>Администрирование</strong>
+    <span class="spacer"></span>
+    <span class="row" id="userbar"></span>
+  </header>
+  <main>
+    <div class="two">
+      <div class="card">
+        <h3>Клиники</h3>
+        <table id="clinics"></table>
+        <form class="stack" id="clinicForm" style="margin-top:12px">
+          <input name="name" placeholder="Название клиники" required maxlength="100">
+          <input name="address" placeholder="Адрес" maxlength="200">
+          <div class="row"><input name="phone" placeholder="Телефон" style="flex:1"><input name="hours" placeholder="Часы работы" style="flex:1"></div>
+          <button type="submit">Добавить клинику</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Пользователи</h3>
+        <table id="users"></table>
+        <form class="stack" id="userForm" style="margin-top:12px">
+          <div class="row"><input name="name" placeholder="Имя" required maxlength="100" style="flex:1"><input name="login" placeholder="Логин" required autocapitalize="off" style="flex:1"></div>
+          <input name="password" placeholder="Пароль (мин. 6)" required minlength="6">
+          <div class="row">
+            <select name="role" id="roleSel" style="flex:1">
+              <option value="clinic_admin">Админ клиники</option>
+              <option value="staff">Персонал</option>
+              <option value="remote_vet">Удалённый ветеринар</option>
+              <option value="superadmin">Суперадмин</option>
+            </select>
+            <select name="clinicId" id="clinicSel" style="flex:1"></select>
+          </div>
+          <input name="specialization" id="specInput" placeholder="Специализация врача" class="hidden" maxlength="200">
+          <button type="submit">Создать пользователя</button>
+        </form>
+      </div>
+    </div>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    let me, clinics = [];
+
+    async function load() {
+      clinics = await api('GET', '/api/admin/clinics');
+      const users = await api('GET', '/api/admin/users');
+      const name = id => (clinics.find(c => c.id === id) || {}).name || '';
+      $('#clinics').innerHTML = clinics.map(c => `<tr><td><a href="/staff.html?clinic=${encodeURIComponent(c.id)}">${esc(c.name)}</a><div class="small muted">${esc(c.address)}</div></td>
+        <td class="small muted">${c.users} польз.</td><td class="num"><button class="small danger" data-clinic="${c.id}">Удалить</button></td></tr>`).join('') || '<tr><td class="muted">Клиник нет</td></tr>';
+      $('#users').innerHTML = users.map(u => `<tr><td>${esc(u.name)}<div class="small muted">${esc(u.login)}</div></td>
+        <td class="small">${ROLE_NAMES[u.role]}<div class="muted">${esc(name(u.clinicId))}</div></td>
+        <td class="num">${u.id === me.id ? '' : `<button class="small danger" data-user="${u.id}">Удалить</button>`}</td></tr>`).join('');
+      const sel = $('#clinicSel').value;
+      $('#clinicSel').innerHTML = clinics.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      if (sel) $('#clinicSel').value = sel;
+    }
+
+    function syncRole() {
+      const r = $('#roleSel').value;
+      $('#clinicSel').classList.toggle('hidden', !(r === 'staff' || r === 'clinic_admin'));
+      $('#specInput').classList.toggle('hidden', r !== 'remote_vet');
+    }
+
+    $('#roleSel').onchange = syncRole;
+    $('#clinicForm').onsubmit = async e => {
+      e.preventDefault();
+      if (await act(() => api('POST', '/api/admin/clinics', Object.fromEntries(new FormData(e.target))))) { e.target.reset(); load(); }
+    };
+    $('#userForm').onsubmit = async e => {
+      e.preventDefault();
+      if (await act(() => api('POST', '/api/admin/users', Object.fromEntries(new FormData(e.target))))) { e.target.reset(); syncRole(); toast('Пользователь создан'); load(); }
+    };
+    document.body.addEventListener('click', async e => {
+      const { clinic, user } = e.target.dataset;
+      if (clinic && confirm('Удалить клинику вместе с её сотрудниками и очередью?') && await act(() => api('DELETE', '/api/admin/clinics/' + clinic))) load();
+      if (user && confirm('Удалить пользователя?') && await act(() => api('DELETE', '/api/admin/users/' + user))) load();
+    });
+
+    (async () => {
+      me = await api('GET', '/api/me');
+      if (me.role !== 'superadmin') return void (location.href = '/login.html');
+      mountUserBar(me);
+      syncRole();
+      await load();
+    })().catch(e => toast(e.message, true));
+  </script>
+</body>
+</html>

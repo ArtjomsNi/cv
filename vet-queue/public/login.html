@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход — ВетОчередь</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top"><a class="logo" href="/">🐾 ВетОчередь</a></header>
+  <main style="max-width: 400px">
+    <form class="card stack" id="f">
+      <h2>Вход для клиник и врачей</h2>
+      <label class="field">Логин<input name="login" required autocomplete="username" autocapitalize="off"></label>
+      <label class="field">Пароль<input name="password" type="password" required autocomplete="current-password"></label>
+      <button type="submit">Войти</button>
+      <p class="small muted">Логин выдаёт администратор вашей клиники.</p>
+    </form>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    const HOME = { superadmin: '/admin.html', remote_vet: '/vet.html', clinic_admin: '/staff.html', staff: '/staff.html' };
+    const next = new URLSearchParams(location.search).get('next');
+    $('#f').onsubmit = async e => {
+      e.preventDefault();
+      const u = await act(() => api('POST', '/api/login', Object.fromEntries(new FormData(e.target))));
+      if (u) location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : HOME[u.role];
+    };
+  </script>
+</body>
+</html>

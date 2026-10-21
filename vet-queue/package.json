@@ -1,0 +1,13 @@
+{
+  "name": "vet-queue",
+  "version": "0.1.0",
+  "description": "Живая очередь для ветеринарных клиник",
+  "private": true,
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node server.js --demo",
+    "test": "node --test test/*.test.js"
+  }
+}

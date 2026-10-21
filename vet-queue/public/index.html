@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ВетОчередь — живая очередь в ветклиниках</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">🐾 ВетОчередь</a>
+    <nav>
+      <a href="#clinics">Клиники</a>
+      <a href="#vets">Онлайн-консультация</a>
+    </nav>
+    <span class="spacer"></span>
+    <a class="btn ghost" href="/login.html">Вход для клиник</a>
+  </header>
+
+  <main>
+    <section id="clinics">
+      <div class="row" style="justify-content: space-between; margin-bottom: 12px;">
+        <h1 style="margin:0">Очереди в клиниках сейчас</h1>
+        <input id="search" type="search" placeholder="Поиск: клиника, город, аппарат…" style="width: min(320px, 100%)">
+      </div>
+      <p class="muted small">Данные обновляются автоматически. «Ждать ≈» — оценка для того, кто встанет в очередь прямо сейчас.</p>
+      <div class="grid" id="clinicList"><p class="muted">Загрузка…</p></div>
+    </section>
+
+    <section id="vets" style="margin-top: 40px;">
+      <h2>Онлайн-консультация с ветеринаром</h2>
+      <p class="muted">Врачи, которые работают из дома, могут подсказать, нужно ли срочно ехать в клинику. Консультация проходит по видеосвязи.</p>
+      <div class="grid" id="vetList"></div>
+    </section>
+  </main>
+
+  <dialog id="consultDlg">
+    <form class="stack" id="consultForm">
+      <h3>Запрос консультации: <span id="consultVetName"></span></h3>
+      <input type="hidden" name="vetId">
+      <label class="field">Ваше имя<input name="clientName" required maxlength="100"></label>
+      <label class="field">Телефон или e-mail<input name="contact" required maxlength="100"></label>
+      <label class="field">Питомец (вид, возраст)<input name="pet" maxlength="200" placeholder="Кот, 5 лет"></label>
+      <label class="field">Что случилось?<textarea name="question" required maxlength="2000"></textarea></label>
+      <p class="small muted">⚠️ Если животное в критическом состоянии — сразу езжайте в ближайшую клинику.</p>
+      <div class="row"><button type="submit">Отправить</button><button type="button" class="ghost" id="consultCancel">Отмена</button></div>
+    </form>
+  </dialog>
+
+  <script src="/app.js"></script>
+  <script>
+    let clinics = [];
+
+    function equipmentRow(e) {
+      const status = e.working ? '<span class="badge ok">работает</span>' : '<span class="badge bad">не работает</span>';
+      const spec = e.specialistToday
+        ? `<span class="badge ok" title="${esc(e.specialist)}">специалист есть${e.specialist ? ': ' + esc(e.specialist) : ''}</span>`
+        : '<span class="badge warn">специалиста сегодня нет</span>';
+      return `<tr><td>${esc(e.name)}${e.note ? `<div class="small muted">${esc(e.note)}</div>` : ''}</td><td>${status}</td><td>${spec}</td></tr>`;
+    }
+
+    function clinicCard(c) {
+      const s = c.stats;
+      const serving = s.serving.map(x => `<span class="chip now">${esc(x.number)}${x.room ? ' → ' + esc(x.room) : ''}</span>`).join('') || '<span class="muted small">никого</span>';
+      const waiting = s.waiting.map(n => `<span class="chip">${esc(n)}</span>`).join('') || '<span class="muted small">очереди нет</span>';
+      return `<article class="card">
+        <h3>${esc(c.name)}</h3>
+        <div class="small muted">${esc(c.address)}${c.phone ? ' · <a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>' : ''}</div>
+        ${c.hours ? `<div class="small muted">🕒 ${esc(c.hours)}</div>` : ''}
+        <div class="stats">
+          <div class="stat"><b>${s.waitingCount}</b><span>в очереди</span></div>
+          <div class="stat"><b>${minutes(s.avgWaitMin)}</b><span>ср. ожидание сегодня</span></div>
+          <div class="stat"><b>${minutes(s.estimatedWaitMin)}</b><span>ждать ≈ сейчас</span></div>
+        </div>
+        <div class="small muted">Сейчас на приёме · врачей: ${c.rooms}</div>
+        <div class="chips" style="margin: 4px 0 8px">${serving}</div>
+        <div class="small muted">Ожидают</div>
+        <div class="chips" style="margin: 4px 0 8px">${waiting}</div>
+        ${c.equipment.length ? `<table><thead><tr><th>Аппарат</th><th>Статус</th><th>Сегодня</th></tr></thead><tbody>${c.equipment.map(equipmentRow).join('')}</tbody></table>` : ''}
+        <details><summary>Цены (${c.prices.length})</summary>
+          <table>${c.prices.map(p => `<tr><td>${esc(p.name)}${p.note ? ` <span class="small muted">${esc(p.note)}</span>` : ''}</td><td class="num">${money(p.price)}</td></tr>`).join('') || '<tr><td class="muted">Цены не указаны</td></tr>'}</table>
+        </details>
+        <div class="row" style="margin-top:10px"><a class="small" href="/display.html?clinic=${encodeURIComponent(c.id)}" target="_blank">📺 Табло очереди</a></div>
+      </article>`;
+    }
+
+    function renderClinics() {
+      const q = $('#search').value.trim().toLowerCase();
+      const list = clinics.filter(c => !q || [c.name, c.address, ...c.equipment.map(e => e.name)].join(' ').toLowerCase().includes(q));
+      $('#clinicList').innerHTML = list.map(clinicCard).join('') || '<p class="muted">Ничего не найдено</p>';
+    }
+
+    async function loadClinics() {
+      clinics = await api('GET', '/api/public/clinics');
+      renderClinics();
+    }
+
+    async function loadVets() {
+      const vets = await api('GET', '/api/public/vets');
+      vets.sort((a, b) => b.online - a.online);
+      $('#vetList').innerHTML = vets.map(v => `<article class="card">
+        <h3><span class="dot ${v.online ? 'on' : ''}"></span>${esc(v.name)}</h3>
+        <p class="muted small">${esc(v.specialization) || 'Ветеринар'}</p>
+        <button data-vet="${esc(v.id)}" data-name="${esc(v.name)}" ${v.online ? '' : 'disabled'}>${v.online ? 'Запросить консультацию' : 'Сейчас не в сети'}</button>
+      </article>`).join('') || '<p class="muted">Пока нет врачей для онлайн-консультаций.</p>';
+    }
+
+    $('#search').oninput = renderClinics;
+    $('#vetList').onclick = e => {
+      const b = e.target.closest('button[data-vet]');
+      if (!b) return;
+      const f = $('#consultForm');
+      f.vetId.value = b.dataset.vet;
+      $('#consultVetName').textContent = b.dataset.name;
+      $('#consultDlg').showModal();
+    };
+    $('#consultCancel').onclick = () => $('#consultDlg').close();
+    $('#consultForm').onsubmit = async e => {
+      e.preventDefault();
+      const r = await act(() => api('POST', '/api/public/consultations', Object.fromEntries(new FormData(e.target))));
+      if (r) location.href = `/consult.html?id=${encodeURIComponent(r.id)}&t=${encodeURIComponent(r.token)}`;
+    };
+
+    loadClinics();
+    loadVets();
+    onLive(({ scope }) => {
+      if (scope.startsWith('clinic:')) loadClinics();
+      if (scope === 'vets') loadVets();
+    });
+  </script>
+</body>
+</html>

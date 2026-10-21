@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кабинет врача — ВетОчередь</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">🐾 ВетОчередь</a>
+    <strong>Онлайн-консультации</strong>
+    <span class="spacer"></span>
+    <span class="row" id="userbar"></span>
+  </header>
+  <main style="max-width: 900px">
+    <div class="card row" style="justify-content: space-between">
+      <div><span class="dot" id="dot"></span><b id="statusText"></b>
+        <div class="small muted">Когда вы «в сети», клиенты видят вас на главной странице и могут отправить запрос.</div></div>
+      <button id="toggle"></button>
+    </div>
+    <form class="card row" id="specForm" style="margin-top:16px">
+      <label class="field" style="flex:1">Специализация (видна клиентам)<input name="specialization" maxlength="200"></label>
+      <button type="submit">Сохранить</button>
+    </form>
+    <h2 style="margin-top:24px">Заявки</h2>
+    <div id="list" class="stack" style="display:flex; flex-direction:column; gap:12px"></div>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    let user;
+    const STATUS = { new: ['warn', 'новая'], accepted: ['ok', 'идёт'], declined: ['bad', 'отклонена'], done: ['', 'завершена'] };
+
+    function renderStatus() {
+      $('#dot').classList.toggle('on', user.online);
+      $('#statusText').textContent = user.online ? 'Вы в сети' : 'Вы не в сети';
+      $('#toggle').textContent = user.online ? 'Уйти из сети' : 'Выйти в сеть';
+      $('#toggle').className = user.online ? 'ghost' : '';
+    }
+
+    async function loadList() {
+      const items = await api('GET', '/api/vet/consultations');
+      $('#list').innerHTML = items.map(c => {
+        const [cls, label] = STATUS[c.status];
+        const actions = {
+          new: `<button data-a="accept" data-id="${c.id}">Принять и открыть видеозвонок</button> <button class="danger" data-a="decline" data-id="${c.id}">Отклонить</button>`,
+          accepted: `<a class="btn" href="${esc(c.roomUrl)}" target="_blank" rel="noopener">Открыть видеозвонок</a> <button class="ghost" data-a="done" data-id="${c.id}">Завершить</button>`,
+        }[c.status] || '';
+        return `<article class="card">
+          <div class="row" style="justify-content:space-between"><b>${esc(c.clientName)}</b><span class="badge ${cls}">${label}</span></div>
+          <div class="small muted">${new Date(c.createdAt).toLocaleString('ru-RU')} · ${esc(c.contact)}${c.pet ? ' · ' + esc(c.pet) : ''}</div>
+          <p style="white-space:pre-wrap">${esc(c.question)}</p>
+          <div class="row">${actions}</div>
+        </article>`;
+      }).join('') || '<p class="muted">Заявок пока нет.</p>';
+    }
+
+    $('#toggle').onclick = async () => {
+      const u = await act(() => api('PUT', '/api/vet/status', { online: !user.online }));
+      if (u) { user = u; renderStatus(); }
+    };
+    $('#specForm').onsubmit = async e => {
+      e.preventDefault();
+      const u = await act(() => api('PUT', '/api/vet/status', { specialization: e.target.specialization.value }));
+      if (u) { user = u; toast('Сохранено'); }
+    };
+    $('#list').onclick = async e => {
+      const b = e.target.closest('button[data-a]');
+      if (!b) return;
+      if (b.dataset.a === 'decline' && !confirm('Отклонить заявку?')) return;
+      const r = await act(() => api('POST', `/api/vet/consultations/${b.dataset.id}/${b.dataset.a}`));
+      if (r && r.roomUrl && b.dataset.a === 'accept') window.open(r.roomUrl, '_blank', 'noopener');
+      loadList();
+    };
+
+    let known = 0;
+    (async () => {
+      user = await api('GET', '/api/me');
+      if (user.role !== 'remote_vet') return void (location.href = '/login.html');
+      mountUserBar(user);
+      renderStatus();
+      $('#specForm').specialization.value = user.specialization || '';
+      await loadList();
+      known = document.querySelectorAll('#list [data-a=accept]').length;
+      onLive(async ({ scope }) => {
+        if (scope !== 'consult') return;
+        await loadList();
+        const n = document.querySelectorAll('#list [data-a=accept]').length;
+        if (n > known) { toast('Новая заявка на консультацию!'); document.title = '🔔 Новая заявка — ВетОчередь'; }
+        known = n;
+      });
+      addEventListener('focus', () => { document.title = 'Кабинет врача — ВетОчередь'; });
+    })().catch(e => toast(e.message, true));
+  </script>
+</body>
+</html>

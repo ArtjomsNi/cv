@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Табло очереди</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { background: #0e1a1f; color: #fff; height: 100vh; display: flex; flex-direction: column; }
+    .head { padding: 2vh 3vw; display: flex; justify-content: space-between; align-items: baseline; }
+    .head h1 { font-size: 4vh; margin: 0; }
+    .clock { font-size: 4vh; font-variant-numeric: tabular-nums; }
+    .cols { flex: 1; display: grid; grid-template-columns: 3fr 2fr; gap: 3vw; padding: 0 3vw 3vh; }
+    .col h2 { font-size: 3vh; color: #8fb3bd; text-transform: uppercase; letter-spacing: .1em; }
+    .now { display: grid; gap: 2vh; }
+    .now div { background: #1a7f6e; border-radius: 2vh; padding: 2vh 3vw; display: flex; justify-content: space-between; font-size: 8vh; font-weight: 700; }
+    .now div span { font-weight: 400; }
+    .wait { display: flex; flex-wrap: wrap; gap: 1.5vh; }
+    .wait span { background: #22343c; border-radius: 1.5vh; padding: 1vh 2vw; font-size: 5vh; font-variant-numeric: tabular-nums; }
+    .foot { padding: 2vh 3vw; font-size: 3vh; color: #8fb3bd; display: flex; gap: 4vw; border-top: 1px solid #22343c; }
+    .foot b { color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="head"><h1 id="name">…</h1><div class="clock" id="clock"></div></div>
+  <div class="cols">
+    <div class="col"><h2>Проходите</h2><div class="now" id="now"></div></div>
+    <div class="col"><h2>Ожидают</h2><div class="wait" id="wait"></div></div>
+  </div>
+  <div class="foot">
+    <div>В очереди: <b id="cnt">0</b></div>
+    <div>Среднее ожидание: <b id="avg">—</b></div>
+    <div>Ждать ≈ <b id="est">—</b></div>
+  </div>
+  <script src="/app.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get('clinic');
+    let lastServing = '';
+
+    function beep() {
+      try {
+        const ctx = new AudioContext();
+        const o = ctx.createOscillator();
+        o.frequency.value = 880;
+        o.connect(ctx.destination);
+        o.start();
+        o.stop(ctx.currentTime + 0.25);
+      } catch { /* браузер может блокировать звук без клика */ }
+    }
+
+    async function load() {
+      const c = await api('GET', '/api/public/clinics/' + encodeURIComponent(id));
+      const s = c.stats;
+      $('#name').textContent = c.name;
+      $('#now').innerHTML = s.serving.map(x => `<div>${esc(x.number)}<span>${x.room ? '→ ' + esc(x.room) : ''}</span></div>`).join('') || '<p style="font-size:3vh;color:#8fb3bd">—</p>';
+      $('#wait').innerHTML = s.waiting.map(n => `<span>${esc(n)}</span>`).join('');
+      $('#cnt').textContent = s.waitingCount;
+      $('#avg').textContent = minutes(s.avgWaitMin);
+      $('#est').textContent = minutes(s.estimatedWaitMin);
+      const key = s.serving.map(x => x.number).join(',');
+      if (lastServing && key !== lastServing && s.serving.length) beep();
+      lastServing = key || ' ';
+    }
+    setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); }, 1000);
+    load().catch(e => { $('#name').textContent = e.message; });
+    onLive(({ scope }) => { if (scope === 'clinic:' + id) load(); });
+  </script>
+</body>
+</html>

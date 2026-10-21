@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Взять номер</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4vh; padding: 16px; }
+    h1 { font-size: clamp(24px, 5vh, 48px); }
+    #big { width: min(60vh, 80vw); height: min(60vh, 80vw); border-radius: 50%; font-size: clamp(24px, 5vh, 52px); font-weight: 700; box-shadow: 0 1vh 4vh rgba(26,127,110,.4); }
+    #big:active { transform: scale(.97); }
+    #result { font-size: clamp(20px, 4vh, 40px); }
+    #result b { display: block; font-size: clamp(60px, 18vh, 180px); color: var(--accent); }
+  </style>
+</head>
+<body>
+  <h1 id="name">…</h1>
+  <button id="big">Взять номер<br>в очередь</button>
+  <div id="result" class="hidden"></div>
+  <p class="muted" id="info"></p>
+  <script src="/app.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const id = params.get('clinic');
+    const key = params.get('key');
+    let resetTimer;
+
+    async function loadInfo() {
+      const c = await api('GET', '/api/public/clinics/' + encodeURIComponent(id));
+      $('#name').textContent = c.name;
+      $('#info').textContent = `Сейчас в очереди: ${c.stats.waitingCount} · ждать ≈ ${minutes(c.stats.estimatedWaitMin)}`;
+    }
+
+    $('#big').onclick = async () => {
+      $('#big').disabled = true;
+      const r = await act(() => api('POST', `/api/kiosk/${encodeURIComponent(id)}/ticket`, { key }));
+      $('#big').disabled = false;
+      if (!r) return;
+      $('#big').classList.add('hidden');
+      $('#info').classList.add('hidden');
+      $('#result').classList.remove('hidden');
+      $('#result').innerHTML = `Ваш номер<b>${esc(r.number)}</b>Перед вами: ${r.position - 1} · ждать ≈ ${esc(minutes(r.estimatedWaitMin))}<br><span class="muted small">Номер также показан на табло и на сайте</span>`;
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => { $('#result').classList.add('hidden'); $('#big').classList.remove('hidden'); $('#info').classList.remove('hidden'); }, 10000);
+    };
+
+    loadInfo().catch(e => { $('#name').textContent = e.message; });
+    onLive(({ scope }) => { if (scope === 'clinic:' + id) loadInfo(); });
+  </script>
+</body>
+</html>
